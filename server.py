@@ -1,34 +1,40 @@
 #!/usr/bin/env python3
 
+from http import client
 import threading
 import socket
 import argparse
 import os
+import json
 
+def findClient(target):
+
+    for client in clients:
+
+        if client.socket_name == target:
+            return client
+
+clients = []
+rooms = []
+
+class Client():
+    def __init__(self):
+        self.socket_name = None
+        self.room = None
+    
 
 class Server(threading.Thread):
-    """
-    Supports management of server connections.
 
-    Attributes:
-        connections (list): A list of ServerSocket objects representing the active connections.
-        host (str): The IP address of the listening socket.
-        port (int): The port number of the listening socket.
-    """
     def __init__(self, host, port):
         super().__init__()
         self.connections = []
         self.host = host
         self.port = port
     
+
+
     def run(self):
-        """
-        Creates the listening socket. The listening socket will use the SO_REUSEADDR option to
-        allow binding to a previously-used socket address. This is a small-scale application which
-        only supports one waiting connection at a time. 
-        For each new connection, a ServerSocket thread is started to facilitate communications with
-        that particular client. All ServerSocket objects are stored in the connections attribute.
-        """
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((self.host, self.port))
@@ -38,92 +44,120 @@ class Server(threading.Thread):
 
         while True:
 
-            # Accept new connection
+
             sc, sockname = sock.accept()
             print('Accepted a new connection from {} to {}'.format(sc.getpeername(), sc.getsockname()))
-
-            # Create new thread
+            
+            
             server_socket = ServerSocket(sc, sockname, self)
             
-            # Start new thread
+
             server_socket.start()
+            print(sockname, server_socket.sockname)
+            client = Client()
+            client.socket_name = sockname
+            client.room = 'sala1'
 
-            # Add thread to active connections
+            clients.append(client)
             self.connections.append(server_socket)
+            print(clients)
             print('Ready to receive messages from', sc.getpeername())
+            roomsObj = {
+                "header": "room",
+                "message": rooms
+            }
+            roomsJson = json.dumps(roomsObj)
+            server_socket.send(roomsJson)
 
-    def broadcast(self, message, source):
-        """
-        Sends a message to all connected clients, except the source of the message.
+    def broadcast(self, message, source, name, isroom):
+        client = findClient(source)
+        print(source)
+        jsonObj = {
+            "header": "message",
+            "message": message,
+            "name": name
+        }
+        jsonString = json.dumps(jsonObj)
 
-        Args:
-            message (str): The message to broadcast.
-            source (tuple): The socket address of the source client.
-        """
         for connection in self.connections:
+            connClient = findClient(connection.sockname)
 
-            # Send to all connected clients except the source client
-            if connection.sockname != source:
-                connection.send(message)
+            if connClient.room == client.room:
+                if(isroom == 'false'):
+                    connection.send(jsonString)
+                else:
+                    connection.send(message)
     
     def remove_connection(self, connection):
-        """
-        Removes a ServerSocket thread from the connections attribute.
+        client = findClient(connection.sockname)
 
-        Args:
-            connection (ServerSocket): The ServerSocket thread to remove.
-        """
         self.connections.remove(connection)
+        clients.pop(clients.index(client))
 
 
 class ServerSocket(threading.Thread):
-    """
-    Supports communications with a connected client.
 
-    Attributes:
-        sc (socket.socket): The connected socket.
-        sockname (tuple): The client socket address.
-        server (Server): The parent thread.
-    """
     def __init__(self, sc, sockname, server):
         super().__init__()
         self.sc = sc
         self.sockname = sockname
         self.server = server
     
+
+
     def run(self):
-        """
-        Receives data from the connected client and broadcasts the message to all other clients.
-        If the client has left the connection, closes the connected socket and removes itself
-        from the list of ServerSocket threads in the parent Server thread.
-        """
+
         while True:
             message = self.sc.recv(1024).decode('ascii')
+            print('message: ', message)
             if message:
-                print('{} says {!r}'.format(self.sockname, message))
-                self.server.broadcast(message, self.sockname)
+                print(message)
+                jsonMessage = json.loads(message)
+                if jsonMessage["header"] == "connect":
+                    newClient = Client()
+                    newClient.socket_name = self.sockname
+                    newClient.room = jsonMessage["message"]
+
+                    clientRoom = findClient(self.sockname)
+                    clients[clients.index(clientRoom)] = newClient
+                    
+
+                elif jsonMessage["header"] == "disconnect":
+                    message = '{} has left the chat.'.format(jsonMessage["name"])
+                    self.server.broadcast(message, self.sockname, 'Server', 'false')
+                    roomsObj = {
+                        "header": "room",
+                        "message": rooms
+                        }
+                    roomsJson = json.dumps(roomsObj)
+                    self.server.broadcast(roomsJson, self.sockname,'','true')
+
+                elif jsonMessage["header"] == "room":
+                    rooms.append(jsonMessage["message"])
+                    roomsObj = {
+                        "header": "room",
+                        "message": rooms
+                        }
+                    roomsJson = json.dumps(roomsObj)
+                    self.server.broadcast(roomsJson, self.sockname,'','true')
+
+                else:
+                    self.server.broadcast(jsonMessage["message"], self.sockname,jsonMessage["name"],'false')
             else:
-                # Client has closed the socket, exit the thread
+
                 print('{} has closed the connection'.format(self.sockname))
                 self.sc.close()
                 server.remove_connection(self)
                 return
+
     
     def send(self, message):
-        """
-        Sends a message to the connected server.
 
-        Args:
-            message (str): The message to be sent.
-        """
         self.sc.sendall(message.encode('ascii'))
 
 
 def exit(server):
-    """
-    Allows the server administrator to shut down the server.
-    Typing 'q' in the command line will close all active connections and exit the application.
-    """
+
     while True:
         ipt = input('')
         if ipt == 'q':
@@ -141,7 +175,7 @@ if __name__ == '__main__':
                         help='TCP port (default 1060)')
     args = parser.parse_args()
 
-    # Create and start server thread
+
     server = Server(args.host, args.p)
     server.start()
 
