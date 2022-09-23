@@ -6,6 +6,7 @@ import os
 import sys
 import tkinter as tk
 import queue
+import select
 
 class Send(threading.Thread):
     def __init__(self, sock, name):
@@ -37,33 +38,39 @@ class Receive(threading.Thread):
         self.rooms_array = rooms_array
 
     def run(self):
-        while True:
-            message = self.sock.recv(1024).decode('ascii')
+        inputs = [self.sock]
+        outputs = []
+        while True: 
+            # message = self.sock.recv(1024).decode('ascii')
+            readable, writable, exceptional = select.select(inputs, outputs, inputs)
+            for s in readable:
+                # message = self.sock.recv(1024).decode('ascii')
+                message = s.recv(1024).decode('ascii')
+                print('message: ', message)
+                if message:
+                    json = eval(message)
+                    if(json["header"] == 'room'):
+                        self.rooms_array.clear()
 
-            json = eval(message)
+                        for index, roomNumber in enumerate(json['message']):
+                            self.rooms_array.append(roomNumber)
+                        self.rooms_array.append(69)
+                        print('thisis', self.rooms_array)
+                        self.rooms.delete(0, 'end')
 
-            if(json["header"] == 'room'):
-                self.rooms_array.clear()
+                        list_rooms(self.rooms_array, self.rooms)
 
-                for index, roomNumber in enumerate(json['message']):
-                    self.rooms_array.append(roomNumber)
-                self.rooms_array.append(69)
-                print('thisis', self.rooms_array)
-                self.rooms.delete(0, 'end')
+                    if json["header"] == 'message':
+                        print(eval(message)["header"])
 
-                list_rooms(self.rooms_array, self.rooms)
+                        print(eval(message))
+                        if self.messages:
+                            self.messages.insert(tk.END, eval(message)["name"] +': ' + eval(message)["message"])
+                            print('\r{}\n{}: '.format(message, self.name), end = '')
+                        
+                        else:
 
-            if json["header"] == 'message':
-                print(eval(message)["header"])
-
-                print(eval(message))
-                if self.messages:
-                    self.messages.insert(tk.END, eval(message)["name"] +': ' + eval(message)["message"])
-                    print('\r{}\n{}: '.format(message, self.name), end = '')
-                
-                else:
-
-                    print('\r{}\n{}: '.format(message, self.name), end = '')
+                            print('\r{}\n{}: '.format(message, self.name), end = '')
 
 class Client:
     def __init__(self, host, port, rooms, rooms_array):
@@ -187,11 +194,11 @@ def main(host, port):
     text_input = tk.Entry(master=frm_entry)
     text_input.pack(fill=tk.BOTH, expand=True)
 
-    text_input.insert(0, "Your message here.")
+    text_input.insert(0, "")
 
     btn_send = tk.Button(
         master=window,
-        text='Send',
+        text='Enviar',
         command=lambda: client.send('null', text_input.get()) or text_input.delete(0, tk.END)
             
     )

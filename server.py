@@ -115,7 +115,7 @@ class ServerSocket(threading.Thread):
             readable, writable, exceptional = select.select(inputs, outputs, inputs)
             for s in readable:
                 if s is not server:
-                    message = self.sc.recv(1024).decode('ascii')
+                    message = s.recv(1024).decode('ascii')
                     print('message: ', message)
                     if message:
                         print(message)
